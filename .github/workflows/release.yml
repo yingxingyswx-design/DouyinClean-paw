@@ -62,17 +62,19 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Syntax check
-        run: python -m compileall -q main.py gui.py browser.py blocker.py config.py logger.py matcher.py
+        run: python -m compileall -q main.py gui.py gui_console.py browser.py blocker.py config.py logger.py matcher.py
 
-      - name: Build onefile exe
+      - name: Build onefile exes
         run: python -m PyInstaller --noconfirm --clean DouyinClean.spec
 
       - name: Write checksum
         shell: pwsh
         run: |
-          $hash = (Get-FileHash dist/DouyinClean.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  DouyinClean.exe" | Out-File -Encoding ascii dist/DouyinClean.exe.sha256
-          Get-Item dist/DouyinClean.exe | Select-Object Name, Length
+          foreach ($name in @("DouyinClean.exe", "DouyinCleanConsole.exe")) {
+            $hash = (Get-FileHash "dist/$name" -Algorithm SHA256).Hash.ToLower()
+            "$hash  $name" | Out-File -Encoding ascii "dist/$name.sha256"
+          }
+          Get-Item dist/*.exe | Select-Object Name, Length
 
       - name: Upload assets to release
         shell: pwsh
@@ -91,5 +93,5 @@ jobs:
               gh release create $env:TAG --repo $env:GITHUB_REPOSITORY --title "DouyinClean $env:TAG"
             }
           }
-          gh release upload $env:TAG dist/DouyinClean.exe dist/DouyinClean.exe.sha256 --repo $env:GITHUB_REPOSITORY --clobber
+          gh release upload $env:TAG dist/DouyinClean.exe dist/DouyinClean.exe.sha256 dist/DouyinCleanConsole.exe dist/DouyinCleanConsole.exe.sha256 --repo $env:GITHUB_REPOSITORY --clobber
           gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[] | "\(.name) \(.size) bytes"'

@@ -317,6 +317,7 @@ DouyinClean/
 ├── blocker.py       # 网页 UI 拉黑流程、失败即停
 ├── logger.py        # 中文日志、脱敏、history.csv
 ├── gui.py           # GUI 入口（打包成 DouyinClean.exe）
+├── gui_console.py   # 同一 GUI 的控制台入口（打包成 DouyinCleanConsole.exe）
 ├── keywords.txt     # 关键词（每行一个）
 ├── history.csv      # 本地操作历史（运行时生成/追加）
 ├── DouyinClean.spec # PyInstaller 打包配置（本地与 CI 共用）
@@ -350,9 +351,12 @@ python -m pip install -r requirements-dev.txt
 python -m PyInstaller --noconfirm --clean DouyinClean.spec
 ```
 
-产物为 `dist/DouyinClean.exe`（单文件；首次启动会解压到 `.pyi-tmp`，所以比源码启动慢几秒）。
+产物（单文件；首次启动会解压到 `.pyi-tmp`，所以比源码启动慢几秒）：
 
-发布走 GitHub Actions：推送 `v*` 形式的 tag 后，[`release.yml`](.github/workflows/release.yml) 会在 `windows-latest` 上构建 exe、生成 `DouyinClean.exe.sha256`，并附加到对应 Release。
+- `dist/DouyinClean.exe`：入口 `gui.py`。
+- `dist/DouyinCleanConsole.exe`：入口 `gui_console.py`，同一套界面但保留控制台与 stdout/stderr，适合在终端里看报错。
+
+发布走 GitHub Actions：推送 `v*` 形式的 tag 后，[`release.yml`](.github/workflows/release.yml) 会在 `windows-latest` 上构建两个 exe、生成 `DouyinClean.exe.sha256`，并附加到对应 Release。
 
 ```powershell
 git tag -a v0.2 -m "DouyinClean v0.2"

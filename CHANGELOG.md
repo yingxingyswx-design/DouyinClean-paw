@@ -7,6 +7,7 @@
 ### 新增
 
 - `--version` 参数，GUI 标题栏也会显示版本号（`DouyinClean v0.1.1 · 抖音批量拉黑`）。
+- `DouyinCleanConsole.exe` 正式由 `gui_console.py` 入口构建：与 GUI 同一套界面，但保留控制台与 stdout/stderr，便于在终端里排查报错。
 - `LICENSE`：MIT 许可证。
 - `CHANGELOG.md`、`.gitattributes`（统一 LF、标记二进制文件）。
 - `DouyinClean.spec`：本地与 CI 共用的 PyInstaller 单文件打包配置。
