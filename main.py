@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Iterable
 
 from config import (
+    APP_VERSION,
     DEFAULT_CDP_URL,
     DEFAULT_PROFILE_DIRECTORY,
     HISTORY_FILE,
@@ -61,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--check", action="store_true", help="检查 Chrome/CDP/Playwright 环境")
     parser.add_argument("--self-test", action="store_true", help="运行不依赖浏览器的自检")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"DouyinClean {APP_VERSION}",
+        help="显示版本号后退出",
+    )
     parser.add_argument(
         "--execute",
         action="store_true",

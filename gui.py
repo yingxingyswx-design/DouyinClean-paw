@@ -26,6 +26,7 @@ from browser import (
     probe_cdp,
 )
 from config import (
+    APP_VERSION,
     HISTORY_FILE,
     KEYWORDS_FILE,
     LOG_FILE,
@@ -117,7 +118,7 @@ class App:
 
     # ---------- UI ----------
     def _build_ui(self) -> None:
-        self.root.title("DouyinClean · 抖音批量拉黑")
+        self.root.title(f"DouyinClean v{APP_VERSION} · 抖音批量拉黑")
         self.root.geometry("1000x760")
         self.root.minsize(860, 640)
 

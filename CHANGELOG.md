@@ -1,5 +1,23 @@
 # 更新日志
 
+## v0.1.1 — 2026-11-02
+
+工程与可维护性更新，拉黑功能与 v0.1 完全一致。主要用于把发布流程自动化，并补上开源项目该有的基础设施。
+
+### 新增
+
+- `--version` 参数，GUI 标题栏也会显示版本号（`DouyinClean v0.1.1 · 抖音批量拉黑`）。
+- `LICENSE`：MIT 许可证。
+- `CHANGELOG.md`、`.gitattributes`（统一 LF、标记二进制文件）。
+- `DouyinClean.spec`：本地与 CI 共用的 PyInstaller 单文件打包配置。
+- `requirements-dev.txt`：`playwright` + `pyinstaller`，供打包使用。
+- `.github/workflows/release.yml`：推送 `v*` tag 自动在 `windows-latest` 上构建 exe、生成 SHA256 并上传到 Release；支持手动重建已有 tag。
+
+### 变更
+
+- README 增加 CI / 版本 / License 徽章，新增“构建 exe”“许可”章节，项目结构同步更新。
+- Release 资产由人工上传改为 CI 构建，附带 `DouyinClean.exe.sha256` 便于校验。
+
 ## v0.1 — 2026-11-02
 
 首个公开版本，提供独立 GUI 与 CLI 两种用法。
@@ -19,12 +37,6 @@
 - 只通过网页 UI 的“更多 → 拉黑 → 确认”操作，不调用私有接口。
 - 识别到安全验证 / 滑块 / 访问频繁即停止，不尝试绕过。
 - CDP 只允许连接 `127.0.0.1` / `localhost`。
-
-### 工程
-
-- 新增 `DouyinClean.spec`：本地与 CI 共用的 PyInstaller 打包配置。
-- 新增 `.github/workflows/release.yml`：推送 `v*` tag 时在 Windows runner 上自动构建 exe、生成 SHA256 并上传到 Release。
-- 采用 MIT 许可证。
 
 ## 计划中
 

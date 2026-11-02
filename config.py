@@ -32,6 +32,9 @@ DEFAULT_KEYWORDS = ("短剧", "剧场")
 DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 DEFAULT_PROFILE_DIRECTORY = "Default"
 
+APP_VERSION = "0.1.1"
+APP_NAME = "DouyinClean"
+
 DEFAULT_KEYWORDS_TEXT = """# 每行一个关键词，只匹配抖音“用户名”，不匹配抖音号。
 # 以 # 开头的行为注释。
 短剧
