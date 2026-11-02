@@ -456,7 +456,7 @@ class App:
                     self.logger.info("搜索：%s", term)
                     self.events.put(("status", f"搜索：{term}"))
 
-                    for attempt in range(1, 4):
+                    while not self.stop_event.is_set():
                         try:
                             goto_douyin(page, url, settings)
                             accounts = collect_accounts(page, settings, url)
@@ -487,16 +487,18 @@ class App:
                             self.events.put(("stats", history.counts()))
                             break
                         except (PageChallengeError, NotLoggedInError) as exc:
-                            self.logger.error("需要人工处理：%s", exc)
-                            self.events.put(("status", "已暂停：需要登录/验证"))
-                            self.stop_event.set()
-                            return
+                            self.logger.error(
+                                "需要人工处理：%s；30 秒后自动重试。", exc
+                            )
+                            self.events.put(("status", "等待登录/验证，自动重试"))
+                            if not self._wait(30):
+                                return
+                            continue
                         except BrowserError as exc:
                             message = str(exc)
-                            if "502" in message and attempt < 3:
-                                self.logger.warning(
-                                    "502，%d 秒后重试（%d/3）", 180, attempt
-                                )
+                            if "502" in message:
+                                self.logger.warning("502，180 秒后自动重试。")
+                                self.events.put(("status", "502 退避中"))
                                 if not self._wait(180):
                                     return
                                 continue
@@ -510,8 +512,8 @@ class App:
                     break
 
                 if cycle_new == 0:
-                    self.logger.info("本轮没有新增，等待 10 分钟后继续循环。")
-                    if not self._wait(600):
+                    self.logger.info("本轮没有新增，等待 2 分钟后继续循环。")
+                    if not self._wait(120):
                         break
                 else:
                     self.logger.info("本轮新增 %d 个，30 秒后进入下一轮。", cycle_new)
