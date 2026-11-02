@@ -1,0 +1,73 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要重新构建并上传的已有 tag（例如 v0.1）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-exe:
+    name: Build DouyinClean.exe
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Fallback build config for older tags
+        if: ${{ hashFiles('DouyinClean.spec') == '' }}
+        shell: pwsh
+        run: |
+          git fetch --depth=1 origin "+refs/heads/${{ github.event.repository.default_branch }}:refs/remotes/origin/build-config"
+          git checkout refs/remotes/origin/build-config -- DouyinClean.spec requirements-dev.txt
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Syntax check
+        run: python -m compileall -q main.py gui.py browser.py blocker.py config.py logger.py matcher.py
+
+      - name: Build onefile exe
+        run: python -m PyInstaller --noconfirm --clean DouyinClean.spec
+
+      - name: Write checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist/DouyinClean.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  DouyinClean.exe" | Out-File -Encoding ascii dist/DouyinClean.exe.sha256
+          Get-Item dist/DouyinClean.exe | Select-Object Name, Length
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          name: DouyinClean ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          files: |
+            dist/DouyinClean.exe
+            dist/DouyinClean.exe.sha256
+          generate_release_notes: ${{ github.event_name == 'push' }}
+          fail_on_unmatched_files: true

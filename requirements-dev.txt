@@ -1,0 +1,3 @@
+# 开发/打包依赖（运行程序本身只需要 requirements.txt）
+-r requirements.txt
+pyinstaller>=6.16,<7

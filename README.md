@@ -1,5 +1,9 @@
 # DouyinClean
 
+[![release](https://github.com/yingxingyswx-design/DouyinClean-paw/actions/workflows/release.yml/badge.svg)](https://github.com/yingxingyswx-design/DouyinClean-paw/actions/workflows/release.yml)
+[![最新版本](https://img.shields.io/github/v/release/yingxingyswx-design/DouyinClean-paw)](https://github.com/yingxingyswx-design/DouyinClean-paw/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 抖音网页版批量拉黑工具。复用本机 Chrome 的已登录会话，按**用户名**中的关键词筛选账号，先预览、再由用户确认后，通过网页上正常的“更多 → 拉黑”入口逐个处理。
 
 > 默认 **DRY RUN**，不会执行任何拉黑。只有显式传入 `--execute` 并在终端确认后才会操作。
@@ -312,10 +316,16 @@ DouyinClean/
 ├── matcher.py       # 用户名清洗、关键词匹配、去重
 ├── blocker.py       # 网页 UI 拉黑流程、失败即停
 ├── logger.py        # 中文日志、脱敏、history.csv
+├── gui.py           # GUI 入口（打包成 DouyinClean.exe）
 ├── keywords.txt     # 关键词（每行一个）
 ├── history.csv      # 本地操作历史（运行时生成/追加）
+├── DouyinClean.spec # PyInstaller 打包配置（本地与 CI 共用）
 ├── requirements.txt
+├── requirements-dev.txt
 ├── README.md
+├── CHANGELOG.md
+├── LICENSE
+├── .github/workflows/release.yml
 └── .gitignore
 ```
 
@@ -328,3 +338,31 @@ DouyinClean/
 ```
 
 覆盖关键词匹配、用户名清洗、去重、上限、日志脱敏和历史记录读写。
+
+## 13. 构建 exe
+
+本地构建（Windows，需要 Python 3.11+）：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+python -m PyInstaller --noconfirm --clean DouyinClean.spec
+```
+
+产物为 `dist/DouyinClean.exe`（单文件；首次启动会解压到 `.pyi-tmp`，所以比源码启动慢几秒）。
+
+发布走 GitHub Actions：推送 `v*` 形式的 tag 后，[`release.yml`](.github/workflows/release.yml) 会在 `windows-latest` 上构建 exe、生成 `DouyinClean.exe.sha256`，并附加到对应 Release。
+
+```powershell
+git tag -a v0.2 -m "DouyinClean v0.2"
+git push origin v0.2
+```
+
+已经发布过的 tag 想重新构建：在 Actions 页面手动运行 `release` 工作流，填入 tag 名即可。
+
+## 14. 许可
+
+本项目采用 [MIT 许可证](LICENSE)。
+
+请只在你自己的账号和你拥有管理权限的数据上使用本工具；使用者需自行承担因违反平台规则而产生的风险，作者不对账号封禁、数据丢失等后果负责。
