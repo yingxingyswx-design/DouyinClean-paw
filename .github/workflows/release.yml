@@ -24,10 +24,23 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
+      - name: Resolve tag
+        id: tag
+        shell: pwsh
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = if ($env:EVENT -eq "workflow_dispatch") { $env:INPUT_TAG } else { $env:REF_NAME }
+          if (-not $tag) { throw "tag 不能为空" }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "target tag: $tag"
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ steps.tag.outputs.tag }}
           fetch-depth: 0
 
       - name: Fallback build config for older tags
@@ -38,7 +51,7 @@ jobs:
           git checkout refs/remotes/origin/build-config -- DouyinClean.spec requirements-dev.txt
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -61,13 +74,22 @@ jobs:
           "$hash  DouyinClean.exe" | Out-File -Encoding ascii dist/DouyinClean.exe.sha256
           Get-Item dist/DouyinClean.exe | Select-Object Name, Length
 
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-          name: DouyinClean ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-          files: |
-            dist/DouyinClean.exe
-            dist/DouyinClean.exe.sha256
-          generate_release_notes: ${{ github.event_name == 'push' }}
-          fail_on_unmatched_files: true
+      - name: Upload assets to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          $exists = $true
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) { $exists = $false }
+          if (-not $exists) {
+            if ($env:EVENT -eq "push") {
+              gh release create $env:TAG --repo $env:GITHUB_REPOSITORY --title "DouyinClean $env:TAG" --generate-notes
+            } else {
+              gh release create $env:TAG --repo $env:GITHUB_REPOSITORY --title "DouyinClean $env:TAG"
+            }
+          }
+          gh release upload $env:TAG dist/DouyinClean.exe dist/DouyinClean.exe.sha256 --repo $env:GITHUB_REPOSITORY --clobber
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[] | "\(.name) \(.size) bytes"'
