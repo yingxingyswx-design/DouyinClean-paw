@@ -837,6 +837,11 @@ def _scroll_down(page: Page) -> tuple[int, int]:
     return 0, 0
 
 
+def scroll_page_down(page: Page) -> tuple[int, int]:
+    """公开的滚动入口，供 GUI 边检测边拉黑。"""
+    return _scroll_down(page)
+
+
 FOLLOWING_URL = "https://www.douyin.com/user/self"
 
 

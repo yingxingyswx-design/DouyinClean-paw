@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import random
 import sys
 import threading
 import time
@@ -17,11 +18,12 @@ from browser import (
     BrowserError,
     NotLoggedInError,
     PageChallengeError,
-    collect_accounts,
     goto_douyin,
     kill_debug_chrome,
     open_login_chrome,
     open_tool_browser,
+    scroll_page_down,
+    visible_accounts,
 )
 from config import (
     APP_VERSION,
@@ -460,32 +462,77 @@ class App:
                     while not self.stop_event.is_set():
                         try:
                             goto_douyin(page, url, settings)
-                            accounts = collect_accounts(page, settings, url)
-                            match = select_targets(
-                                accounts,
-                                settings.keywords,
-                                blocked_ids=history.blocked_ids(),
-                                limit=settings.limit,
-                            )
-                            self.logger.info(
-                                "采集 %d | 匹配 %d | 历史跳过 %d | 重复 %d",
-                                len(accounts),
-                                len(match.targets),
-                                len(match.already_blocked),
-                                match.duplicates,
-                            )
-                            if not match.targets:
-                                break
-                            stats = execute_blocks(
-                                page,
-                                match.targets,
-                                settings,
-                                history,
-                                continue_on_error=True,
-                                should_stop=self.stop_event.is_set,
-                            )
-                            cycle_new += stats.blocked
-                            self.events.put(("stats", history.counts()))
+                            handled = set(history.blocked_ids())
+                            seen: set[str] = set()
+                            acted = 0
+                            stale_rounds = 0
+
+                            for scroll_round in range(settings.max_scrolls + 1):
+                                batch = visible_accounts(page)
+                                new_visible = 0
+                                for account in batch:
+                                    if account.account_id not in seen:
+                                        seen.add(account.account_id)
+                                        new_visible += 1
+
+                                fresh = [
+                                    account
+                                    for account in batch
+                                    if account.account_id not in handled
+                                ]
+                                remaining = settings.limit - acted
+                                if remaining > 0 and fresh:
+                                    match = select_targets(
+                                        fresh,
+                                        settings.keywords,
+                                        limit=remaining,
+                                    )
+                                    if match.targets:
+                                        self.logger.info(
+                                            "检测到 %d 个匹配账号，立即开始拉黑。",
+                                            len(match.targets),
+                                        )
+                                        stats = execute_blocks(
+                                            page,
+                                            match.targets,
+                                            settings,
+                                            history,
+                                            continue_on_error=True,
+                                            should_stop=self.stop_event.is_set,
+                                        )
+                                        cycle_new += stats.blocked
+                                        acted += len(match.targets)
+                                        handled.update(
+                                            account.account_id
+                                            for account in match.targets
+                                        )
+                                        self.events.put(
+                                            ("stats", history.counts())
+                                        )
+
+                                if self.stop_event.is_set():
+                                    break
+                                if acted >= settings.limit:
+                                    break
+                                if scroll_round >= settings.max_scrolls:
+                                    break
+
+                                if scroll_round > 0 and new_visible == 0:
+                                    stale_rounds += 1
+                                    if stale_rounds >= 2:
+                                        break
+                                else:
+                                    stale_rounds = 0
+
+                                before, after = scroll_page_down(page)
+                                if before == after:
+                                    break
+                                page.wait_for_timeout(
+                                    int(
+                                        random.uniform(*settings.scroll_pause)
+                                        * 1000
+                                    )
+                                )
                             break
                         except (PageChallengeError, NotLoggedInError) as exc:
                             self.logger.error(
