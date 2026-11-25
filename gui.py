@@ -88,7 +88,14 @@ def _find_profile_dir() -> Path | None:
     for candidate in candidates:
         if candidate.is_dir():
             return candidate
-    return None
+
+    # 便携版首次运行：自动创建独立配置目录，让用户先登录。
+    created = PROJECT_DIR / ".chrome-profile"
+    try:
+        created.mkdir(parents=True, exist_ok=True)
+        return created
+    except OSError:
+        return None
 
 
 class GuiLogHandler(logging.Handler):
