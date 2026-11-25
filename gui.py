@@ -17,13 +17,10 @@ from browser import (
     BrowserError,
     NotLoggedInError,
     PageChallengeError,
-    chrome_process_count,
     collect_accounts,
     goto_douyin,
     kill_debug_chrome,
-    launch_chrome,
-    open_session,
-    probe_cdp,
+    open_tool_browser,
 )
 from config import (
     APP_VERSION,
@@ -71,6 +68,17 @@ SEARCH_URL = "https://www.douyin.com/jingxuan/search/{term}?type=user"
 
 
 def _find_profile_dir() -> Path | None:
+    pointer = PROJECT_DIR / "profile_path.txt"
+    if pointer.is_file():
+        try:
+            pointed = Path(
+                pointer.read_text(encoding="utf-8-sig").strip().strip('"')
+            ).expanduser()
+            if pointed.is_dir():
+                return pointed
+        except OSError:
+            pass
+
     candidates: list[Path] = []
     for base in [PROJECT_DIR, *PROJECT_DIR.parents[:3]]:
         candidate = base / ".chrome-profile"
@@ -102,7 +110,6 @@ class App:
         self.events: queue.Queue = queue.Queue()
         self.stop_event = threading.Event()
         self.worker: threading.Thread | None = None
-        self.chrome_worker: threading.Thread | None = None
         self.profile_dir = _find_profile_dir()
 
         self.logger = setup_logger(LOG_FILE, console=False)
@@ -130,16 +137,12 @@ class App:
         ttk.Entry(top, textvariable=self.cdp_var, width=30).grid(
             row=0, column=1, sticky="w", padx=4
         )
-        self.chrome_btn = ttk.Button(
-            top, text="启动/连接 Chrome", command=self._launch_chrome
-        )
-        self.chrome_btn.grid(row=0, column=2, padx=6)
         self.kill_chrome_btn = ttk.Button(
             top, text="关闭工具 Chrome", command=self._kill_chrome
         )
-        self.kill_chrome_btn.grid(row=0, column=3, padx=6)
+        self.kill_chrome_btn.grid(row=0, column=2, padx=6)
         ttk.Button(top, text="打开日志", command=self._open_log).grid(
-            row=0, column=4, padx=6
+            row=0, column=3, padx=6
         )
 
         profile_text = str(self.profile_dir) if self.profile_dir else "未找到 .chrome-profile"
@@ -245,7 +248,6 @@ class App:
                 self.start_btn.configure(state="normal")
                 self.stop_btn.configure(state="disabled")
             elif kind == "chrome_done":
-                self.chrome_btn.configure(state="normal")
                 self.kill_chrome_btn.configure(state="normal")
         self.root.after(150, self._poll_events)
 
@@ -298,43 +300,6 @@ class App:
         return terms
 
     # ---------- 动作 ----------
-    def _launch_chrome(self) -> None:
-        if self.chrome_worker is not None and self.chrome_worker.is_alive():
-            return
-        self.chrome_btn.configure(state="disabled")
-        self.status_var.set("正在启动/连接 Chrome…")
-        self.chrome_worker = threading.Thread(
-            target=self._launch_chrome_worker, daemon=True
-        )
-        self.chrome_worker.start()
-
-    def _launch_chrome_worker(self) -> None:
-        try:
-            settings = self._build_settings()
-            info = probe_cdp(settings.cdp_url, timeout=2.0)
-            if info.ok:
-                self.logger.info("Chrome 调试端口已就绪：%s", info.browser)
-                self.events.put(("status", "Chrome 已就绪"))
-                return
-
-            running = chrome_process_count()
-            if running > 0:
-                self.logger.error(
-                    "Chrome 正在运行，但没有开启调试端口。"
-                    "请完全退出 Chrome 后重试；工具不会结束你的浏览器。"
-                )
-                self.events.put(("status", "Chrome 未开调试端口"))
-                return
-
-            launch_chrome(settings)
-            self.logger.info("Chrome 已启动，调试端口就绪。")
-            self.events.put(("status", "Chrome 已就绪"))
-        except Exception as exc:
-            self.logger.error("启动/连接 Chrome 失败：%s", exc)
-            self.events.put(("status", "Chrome 连接失败"))
-        finally:
-            self.events.put(("chrome_done", None))
-
     def _kill_chrome(self) -> None:
         if self.worker is not None and self.worker.is_alive():
             messagebox.showwarning("任务运行中", "请先停止拉黑任务，再关闭 Chrome。")
@@ -426,24 +391,21 @@ class App:
     def _run(self, settings: Settings, queries: list[str]) -> None:
         session = None
         try:
-            info = probe_cdp(settings.cdp_url, timeout=3.0)
-            if not info.ok:
-                self.logger.error(
-                    "CDP 端口未就绪（%s）。请先启动带调试端口的 Chrome，"
-                    "或点“启动/连接 Chrome”。",
-                    info.detail,
-                )
-                self.events.put(("status", "等待 Chrome 调试端口"))
+            while not self.stop_event.is_set() and session is None:
+                try:
+                    self.logger.info("打开工具专用 Chrome 窗口…")
+                    self.events.put(("status", "打开工具 Chrome"))
+                    session = open_tool_browser(settings)
+                except Exception as exc:
+                    self.logger.error(
+                        "打开 Chrome 失败：%s；30 秒后自动重试。", exc
+                    )
+                    self.events.put(("status", "打开 Chrome 失败，重试中"))
+                    if not self._wait(30):
+                        return
+            if session is None:
                 return
 
-            self.logger.info("连接 Chrome：%s", settings.cdp_url)
-            try:
-                session = open_session(settings, create_tab=False)
-            except BrowserError as exc:
-                if "没有已打开的抖音页面" in str(exc):
-                    session = open_session(settings, create_tab=True)
-                else:
-                    raise
             page = session.page
             history = HistoryStore(settings.history_file)
             self.events.put(("stats", history.counts()))

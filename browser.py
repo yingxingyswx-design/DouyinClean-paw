@@ -71,13 +71,25 @@ class CdpInfo:
 @dataclass(slots=True)
 class Session:
     playwright: Playwright
-    browser: Browser
+    browser: Browser | None
     context: BrowserContext
     page: Page
     created_page: bool
+    persistent: bool = False
 
     def close(self, keep_page: bool = False) -> None:
-        """断开 CDP，不关闭用户正在使用的浏览器。"""
+        """断开 CDP 或关闭工具专用 Chrome。"""
+        if self.persistent:
+            try:
+                self.context.close()
+            except Exception:
+                LOGGER.debug("关闭工具 Chrome 失败（可忽略）", exc_info=True)
+            try:
+                self.playwright.stop()
+            except Exception:
+                LOGGER.debug("停止 Playwright 失败（可忽略）", exc_info=True)
+            return
+
         try:
             if self.created_page and not keep_page and not self.page.is_closed():
                 self.page.close()
@@ -85,7 +97,8 @@ class Session:
             LOGGER.debug("关闭自动化标签页失败（可忽略）", exc_info=True)
         try:
             # 对 connect_over_cdp 而言，close 只断开连接，不会退出 Chrome。
-            self.browser.close()
+            if self.browser is not None:
+                self.browser.close()
         except Exception:
             LOGGER.debug("断开 CDP 连接失败（可忽略）", exc_info=True)
         try:
@@ -283,6 +296,108 @@ def launch_chrome(settings: Settings) -> CdpInfo:
     )
 
 
+def launch_tool_chrome(settings: Settings) -> CdpInfo:
+    """启动工具专用 Chrome 窗口（独立 chrome-profile），不调用用户日常 Chrome。"""
+    info = probe_cdp(settings.cdp_url, timeout=2.0)
+    if info.ok:
+        return info
+
+    if settings.chrome_path is None or not settings.chrome_path.is_file():
+        raise BrowserError("未找到 Chrome，请用 --chrome-path 指定 chrome.exe。")
+    if settings.profile_dir is None or not settings.profile_dir.is_dir():
+        raise BrowserError(
+            f"未找到工具专用配置目录：{settings.profile_dir}。"
+            "请确认 .chrome-profile 与 exe 在同一目录（或上级目录）。"
+        )
+
+    parsed = urlparse(validate_cdp_url(settings.cdp_url))
+    port = parsed.port or 9229
+
+    # 只清理工具自己的残留实例；不会碰用户日常 Chrome。
+    kill_debug_chrome(port)
+    time.sleep(1.5)
+    info = probe_cdp(settings.cdp_url, timeout=2.0)
+    if info.ok:
+        return info
+
+    command = [
+        str(settings.chrome_path),
+        f"--remote-debugging-port={port}",
+        "--remote-debugging-address=127.0.0.1",
+        f"--user-data-dir={settings.profile_dir}",
+        f"--profile-directory={settings.profile_directory}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "https://www.douyin.com/",
+    ]
+
+    startupinfo = None
+    creationflags = 0
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 6  # SW_MINIMIZE
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+    LOGGER.info("正在打开工具专用 Chrome 窗口（%s）…", settings.profile_dir)
+
+    if os.name == "nt":
+        # 用 PowerShell Start-Process 启动，避免 Python 子进程继承某些
+        # 受限作业对象后 Chrome 无法创建配置目录的问题。
+        quoted_args = ", ".join(
+            "'" + argument.replace("'", "''") + "'" for argument in command[1:]
+        )
+        script = (
+            f"Start-Process -FilePath '{str(settings.chrome_path)}' "
+            f"-ArgumentList @({quoted_args}) -WindowStyle Minimized"
+        )
+        powershell_flags = subprocess.CREATE_NO_WINDOW
+        try:
+            completed = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-Command",
+                    script,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                creationflags=powershell_flags,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise BrowserError(f"启动工具专用 Chrome 失败：{exc}") from exc
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            raise BrowserError(f"启动工具专用 Chrome 失败：{detail[:300]}")
+    else:
+        try:
+            subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+            )
+        except OSError as exc:
+            raise BrowserError(f"启动工具专用 Chrome 失败：{exc}") from exc
+
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        info = probe_cdp(settings.cdp_url, timeout=1.0)
+        if info.ok:
+            LOGGER.info("工具专用 Chrome 已就绪：%s", info.browser)
+            return info
+        time.sleep(0.5)
+    raise BrowserError(
+        "工具专用 Chrome 已启动，但 30 秒内无法连接 9229。"
+        "可能该配置目录已被另一个 Chrome 占用，请关闭工具旧 Chrome 后重试。"
+    )
+
+
 def _choose_context(browser: Browser) -> BrowserContext:
     """优先选择已经打开抖音页面的持久化上下文。"""
     contexts = browser.contexts
@@ -396,6 +511,68 @@ def open_session(settings: Settings, create_tab: bool) -> Session:
     except Exception:
         try:
             browser.close()
+        finally:
+            playwright.stop()
+        raise
+
+
+def open_tool_browser(settings: Settings) -> Session:
+    """由工具直接打开专用 Chrome 窗口并跳转抖音，不依赖 CDP 端口。"""
+    from playwright.sync_api import sync_playwright
+
+    if settings.chrome_path is None or not settings.chrome_path.is_file():
+        raise BrowserError("未找到 Chrome，请用 --chrome-path 指定 chrome.exe。")
+    if settings.profile_dir is None or not settings.profile_dir.is_dir():
+        raise BrowserError("未找到工具专用配置目录 .chrome-profile。")
+
+    # 清理上次残留的工具 Chrome（只匹配 chrome-profile，不动日常 Chrome）。
+    try:
+        kill_debug_chrome(9229)
+    except BrowserError:
+        pass
+    time.sleep(1.0)
+
+    _prepare_driver_temp()
+    playwright = sync_playwright().start()
+    try:
+        context = playwright.chromium.launch_persistent_context(
+            user_data_dir=str(settings.profile_dir),
+            executable_path=str(settings.chrome_path),
+            headless=False,
+            args=["--no-first-run", "--no-default-browser-check"],
+        )
+    except Exception as exc:
+        playwright.stop()
+        raise BrowserError(
+            f"打开工具 Chrome 窗口失败（{type(exc).__name__}: {exc}）"
+        ) from exc
+
+    try:
+        pages = [page for page in context.pages if not page.is_closed()]
+        page = next(
+            (item for item in pages if is_douyin_url(item.url)),
+            pages[0] if pages else context.new_page(),
+        )
+        if not is_douyin_url(page.url):
+            page.goto(
+                "https://www.douyin.com/",
+                wait_until="domcontentloaded",
+                timeout=settings.timeout_ms,
+            )
+        page.wait_for_timeout(2000)
+        _install_popup_guards(page)
+        LOGGER.info("工具 Chrome 窗口已打开：%s", page.url)
+        return Session(
+            playwright=playwright,
+            browser=None,
+            context=context,
+            page=page,
+            created_page=False,
+            persistent=True,
+        )
+    except Exception:
+        try:
+            context.close()
         finally:
             playwright.stop()
         raise
