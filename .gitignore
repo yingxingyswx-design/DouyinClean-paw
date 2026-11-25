@@ -6,6 +6,8 @@ build-debug/
 build-app/
 build-console/
 build-final/
+build-v012/
+dist-v012/
 dist-app/
 .pyi-tmp/
 selftest.log
