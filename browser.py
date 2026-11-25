@@ -516,6 +516,64 @@ def open_session(settings: Settings, create_tab: bool) -> Session:
         raise
 
 
+def open_login_chrome(settings: Settings) -> None:
+    """打开工具专用 Chrome 窗口供人工登录（不启动自动化）。"""
+    if settings.chrome_path is None or not settings.chrome_path.is_file():
+        raise BrowserError("未找到 Chrome，请用 --chrome-path 指定 chrome.exe。")
+    if settings.profile_dir is None or not settings.profile_dir.is_dir():
+        raise BrowserError("未找到工具专用配置目录 .chrome-profile。")
+
+    command = [
+        str(settings.chrome_path),
+        f"--user-data-dir={settings.profile_dir}",
+        f"--profile-directory={settings.profile_directory}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "https://www.douyin.com/",
+    ]
+
+    if os.name == "nt":
+        quoted_args = ", ".join(
+            "'" + argument.replace("'", "''") + "'" for argument in command[1:]
+        )
+        script = (
+            f"Start-Process -FilePath '{str(settings.chrome_path)}' "
+            f"-ArgumentList @({quoted_args})"
+        )
+        try:
+            completed = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-Command",
+                    script,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise BrowserError(f"打开登录 Chrome 失败：{exc}") from exc
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            raise BrowserError(f"打开登录 Chrome 失败：{detail[:300]}")
+    else:
+        try:
+            subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            raise BrowserError(f"打开登录 Chrome 失败：{exc}") from exc
+
+    LOGGER.info("已打开登录 Chrome，请完成抖音登录。")
+
+
 def open_tool_browser(settings: Settings) -> Session:
     """由工具直接打开专用 Chrome 窗口并跳转抖音，不依赖 CDP 端口。"""
     from playwright.sync_api import sync_playwright

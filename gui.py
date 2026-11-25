@@ -20,6 +20,7 @@ from browser import (
     collect_accounts,
     goto_douyin,
     kill_debug_chrome,
+    open_login_chrome,
     open_tool_browser,
 )
 from config import (
@@ -110,7 +111,9 @@ class App:
         self.events: queue.Queue = queue.Queue()
         self.stop_event = threading.Event()
         self.worker: threading.Thread | None = None
+        self.login_worker: threading.Thread | None = None
         self.profile_dir = _find_profile_dir()
+        self.cdp_var = tk.StringVar(value="http://127.0.0.1:9229")
 
         self.logger = setup_logger(LOG_FILE, console=False)
         handler = GuiLogHandler(self.events)
@@ -132,17 +135,16 @@ class App:
         top = ttk.Frame(self.root, padding=10)
         top.pack(fill="x")
 
-        ttk.Label(top, text="CDP 地址：").grid(row=0, column=0, sticky="w")
-        self.cdp_var = tk.StringVar(value="http://127.0.0.1:9229")
-        ttk.Entry(top, textvariable=self.cdp_var, width=30).grid(
-            row=0, column=1, sticky="w", padx=4
+        self.login_btn = ttk.Button(
+            top, text="打开工具Chrome窗口完成登入", command=self._open_login_chrome
         )
+        self.login_btn.grid(row=0, column=0, padx=6)
         self.kill_chrome_btn = ttk.Button(
             top, text="关闭工具 Chrome", command=self._kill_chrome
         )
-        self.kill_chrome_btn.grid(row=0, column=2, padx=6)
+        self.kill_chrome_btn.grid(row=0, column=1, padx=6)
         ttk.Button(top, text="打开日志", command=self._open_log).grid(
-            row=0, column=3, padx=6
+            row=0, column=2, padx=6
         )
 
         profile_text = str(self.profile_dir) if self.profile_dir else "未找到 .chrome-profile"
@@ -181,7 +183,7 @@ class App:
         ttk.Checkbutton(param_box, text="跑完一轮后自动循环", variable=self.loop_var).grid(
             row=4, column=0, columnspan=2, sticky="w", pady=(8, 0)
         )
-        self.autostart_var = tk.BooleanVar(value=True)
+        self.autostart_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             param_box, text="启动后自动开始", variable=self.autostart_var
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
@@ -249,6 +251,8 @@ class App:
                 self.stop_btn.configure(state="disabled")
             elif kind == "chrome_done":
                 self.kill_chrome_btn.configure(state="normal")
+            elif kind == "login_done":
+                self.login_btn.configure(state="normal")
         self.root.after(150, self._poll_events)
 
     def _append_log(self, text: str) -> None:
@@ -300,6 +304,33 @@ class App:
         return terms
 
     # ---------- 动作 ----------
+    def _open_login_chrome(self) -> None:
+        if self.worker is not None and self.worker.is_alive():
+            messagebox.showwarning(
+                "任务运行中", "任务已经打开了工具 Chrome，请直接在窗口里登录。"
+            )
+            return
+        if self.login_worker is not None and self.login_worker.is_alive():
+            return
+        self.login_btn.configure(state="disabled")
+        self.status_var.set("正在打开登录 Chrome…")
+        self.login_worker = threading.Thread(
+            target=self._open_login_worker, daemon=True
+        )
+        self.login_worker.start()
+
+    def _open_login_worker(self) -> None:
+        try:
+            settings = self._build_settings()
+            open_login_chrome(settings)
+            self.logger.info("登录 Chrome 已打开，请完成抖音登录后点“开始自动拉黑”。")
+            self.events.put(("status", "请登录后点开始"))
+        except Exception as exc:
+            self.logger.error("打开登录 Chrome 失败：%s", exc)
+            self.events.put(("status", "打开登录 Chrome 失败"))
+        finally:
+            self.events.put(("login_done", None))
+
     def _kill_chrome(self) -> None:
         if self.worker is not None and self.worker.is_alive():
             messagebox.showwarning("任务运行中", "请先停止拉黑任务，再关闭 Chrome。")
